@@ -4,7 +4,7 @@
 // @version      1.0
 // @description  Show large image preview on hover
 // @author       You
-// @match        *://*/*
+// @match        *://gelbooru.com/*
 // @grant        GM_addStyle
 // @grant        GM_xmlhttpRequest
 // ==/UserScript==
@@ -52,16 +52,23 @@
   let hoverTimeout;
   let activeElement = null;
   const existImgs = {};
+  const disposeFunc = () => {
+    clearTimeout(hoverTimeout);
+    hidePreview();
+  };
   document.addEventListener("mousemove", async function (event) {
     const targetImg = event.target.closest("img");
     // 大图就不放大看了
-    if (!targetImg || this.location.href.includes("s=view")) return;
+    if (!targetImg || this.location.href.includes("s=view")) {
+      disposeFunc();
+      return;
+    }
 
     // 如果是新图片元素
     if (activeElement !== targetImg) {
       clearTimeout(hoverTimeout);
       // 避免hover 会展示 title挡住图片
-      targetImg.title = ''
+      targetImg.title = "";
       activeElement = targetImg;
 
       // 高亮当前图片
@@ -75,8 +82,7 @@
     }
   });
   document.addEventListener("mouseout", function (event) {
-    clearTimeout(hoverTimeout);
-    hidePreview();
+    disposeFunc();
   });
 
   // 更新预览位置和图像
@@ -93,17 +99,19 @@
     // 动态调整预览位置
     const viewportWidth = window.innerWidth;
     const viewportHeight = window.innerHeight;
-    const width = 400;
+    const width = 500;
     const previewWidth = Math.min(width, img.width * 4);
     const previewHeight = Math.min((width * img.height) / img.width, img.height * 4);
+    // 获取元素距离视口的top和left, 避免滚动影响了判断 所以不用offsetTop
+    const clientPos = img.getBoundingClientRect();
     // 计算合适的位置（右侧显示）
-    let left = img.offsetLeft + img.width + 20;
+    let left = clientPos.left + img.width + 20;
     if (left + previewWidth > viewportWidth) {
       left = viewportWidth - previewWidth - 10;
     }
 
     // 垂直居中跟随
-    let top = img.offsetTop - previewHeight / 2;
+    let top = clientPos.top - previewHeight / 2;
     if (top < 10) top = 10;
     if (top + previewHeight > viewportHeight - 10) {
       top = viewportHeight - previewHeight - 10;
@@ -134,27 +142,32 @@
       imgElement.dataset.original ||
       imgElement.src ||
       imgElement.currentSrc;
-    const largeImg = temp.replace("thumbnails", "/samples").replace("thumbnail", "sample");
-    const isExist = await checkImageExists(largeImg);
-    let finalImg = largeImg;
-    if (!isExist) {
-      finalImg = temp.replace("thumbnails", "/images").replace("thumbnail_", "");
-      const isExistJpg = await checkImageExists(finalImg);
-      if(!isExistJpg){
-        finalImg = finalImg.replace('jpg', 'png')
+    const sampleImg = temp.replace("thumbnails", "/samples").replace("thumbnail", "sample");
+    const originImg = temp.replace("thumbnails", "/images").replace("thumbnail_", "");
+    const isExistSample = await checkImageExists(sampleImg);
+    let finalImg = sampleImg;
+    if (!isExistSample) {
+      const promiseArr = ['jpg', "png", "gif", 'jpeg'].map((i) => checkImageExists(originImg.replace("jpg", i)));
+      const isExistImageTypeArr = await Promise.all(promiseArr);
+      const findExist = isExistImageTypeArr.find(i=>i);
+      if (findExist) {
+        finalImg = findExist;
+      } else {
+        finalImg = "NO_IMAGE";
       }
     }
     existImgs[temp] = finalImg;
     return finalImg;
   }
 })();
+// 返回 string 或者 false
 function checkImageExists(url) {
   return new Promise((resolve, reject) => {
     GM_xmlhttpRequest({
       method: "HEAD",
       url: url,
       onload: function (response) {
-        resolve(response.status === 200);
+        resolve(response.status === 200 ? url : false);
       },
       onerror: function (error) {
         resolve(false);
